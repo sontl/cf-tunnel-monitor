@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { toast } from 'react-hot-toast';
 import { supabase } from '../utils/supabaseClient';
 import { checkTunnelHealth } from '../utils/healthCheck';
+import { openUrlInBrowser } from '../utils/browserUse';
 import { Tunnel, TunnelStatus } from '../types';
 import { useAuth } from './AuthContext';
 
@@ -204,24 +205,24 @@ export function TunnelProvider({ children }: TunnelProviderProps) {
       // Update the status to recovering
       await updateTunnel(id, { status: 'recovering' });
       
-      // Simulate calling browser-use.com to open the enable URL
-      // In a real implementation, you would integrate with browser-use.com API
-      toast.loading(`Attempting recovery for ${tunnel.server_name}...`);
-      
-      // Implement the retry mechanism
       const MAX_RETRIES = 3;
       let retries = 0;
       
       const attemptRecovery = async () => {
+        const toastId = toast.loading(`Recovery attempt ${retries + 1}/${MAX_RETRIES} for ${tunnel.server_name}...`);
+        
         try {
-          // Simulate calling browser-use service
-          console.log(`Opening enable URL: ${tunnel.enable_url}`);
+          // Open the enable URL in the local Chrome browser
+          await openUrlInBrowser(tunnel.enable_url);
           
-          // Wait for a bit to simulate recovery time
+          // Wait for a bit to allow the tunnel to recover
           await new Promise(resolve => setTimeout(resolve, 5000));
           
           // Check if the tunnel is back online
           const status = await checkTunnelHealth(tunnel.cloudflare_tunnel_id);
+          
+          // Dismiss the current attempt toast
+          toast.dismiss(toastId);
           
           if (status === 'online') {
             await updateTunnel(id, { 
@@ -230,11 +231,8 @@ export function TunnelProvider({ children }: TunnelProviderProps) {
             });
             toast.success(`${tunnel.server_name} recovered successfully`);
             return true;
-          } else if (retries < MAX_RETRIES) {
+          } else if (retries < MAX_RETRIES - 1) {
             retries++;
-            toast.loading(`Recovery attempt ${retries}/${MAX_RETRIES}...`);
-            // Wait longer between retries (exponential backoff)
-            await new Promise(resolve => setTimeout(resolve, 5000 * retries));
             return await attemptRecovery();
           } else {
             await updateTunnel(id, { 
@@ -245,6 +243,7 @@ export function TunnelProvider({ children }: TunnelProviderProps) {
             return false;
           }
         } catch (err) {
+          toast.dismiss(toastId);
           console.error('Recovery attempt failed:', err);
           return false;
         }
